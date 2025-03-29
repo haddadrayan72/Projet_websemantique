@@ -61,23 +61,26 @@ pip install nltk scikit-learn matplotlib networkx python-louvain rdflib
 ---
 
 ## 🚀 Utilisation
-###🔸 Générer un graphe RDF (1 seul texte) :
+### 🔸 Générer un graphe RDF (1 seul texte) :
 
 ```bash
 python main_ameliore.py sample.txt -o graphe_rdf.png -w 2
 ```
 -w : taille de la fenêtre de cooccurrence (par défaut : 2)
+
 Le fichier .ttl RDF sera généré automatiquement.
 
-###🔹 Générer un graphe de similarité (2 textes ou plus) :
+### 🔹 Générer un graphe de similarité (2 textes ou plus) :
 
 ```bash
 python main_ameliore.py sample.txt sample2.txt -o graphe.png -t 0.4 -k 5
 ```
 -t : seuil de similarité cosinus pour créer une arête (0.3 à 0.7 conseillé)
+
 -k : nombre de connexions maximum par mot
 
-##Exemple de sortie
+## Exemple de sortie
+
 Graphe RDF → mots liés par cooccurrence (fenêtre de glissement)
 
 Graphe de similarité → mots groupés par sens via KMeans, avec poids
