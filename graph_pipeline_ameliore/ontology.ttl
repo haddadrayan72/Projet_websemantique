@@ -1,0 +1,15 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix ex: <http://example.org/word#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+ex:Word a owl:Class ;
+    rdfs:label "Mot"@fr ;
+    rdfs:comment "Classe représentant un mot dans un texte"@fr .
+
+ex:cooccursWith a owl:ObjectProperty ;
+    rdfs:domain ex:Word ;
+    rdfs:range ex:Word ;
+    rdfs:label "cooccurre avec"@fr ;
+    rdfs:comment "Relation indiquant une cooccurrence sémantique ou contextuelle entre deux mots."@fr .
