@@ -1,81 +1,156 @@
-import argparse  # Pour gérer les arguments en ligne de commande
-from load_utils import load_corpus  # Chargement du texte brut depuis un fichier
-from text_preprocessing import preprocess_text  # Nettoyage et tokenisation du texte
-from tfidf_calculation import TFIDFProcessor  # Calcul du TF-IDF et filtrage
-from vector_builder import build_document_vectors  # Création des vecteurs à partir du TF-IDF
-from matrix_builder import reduce_matrix_svd  # Réduction de dimension avec SVD
-from sklearn.cluster import KMeans  # Clustering KMeans
-from sklearn.metrics.pairwise import cosine_similarity  # Calcul des similarités cosinus
-import matplotlib.pyplot as plt  # Visualisation du graphe
-import networkx as nx  # Création et manipulation de graphes
+import argparse
+from load_utils import load_corpus  # Chargement du fichier texte brut
+from text_preprocessing import preprocess_text  # Nettoyage, tokenisation, lemmatisation
+from tfidf_calculation import TFIDFProcessor  # Calcul TF-IDF avec filtrage
+from vector_builder import build_document_vectors  # Construction des vecteurs document x terme
+from matrix_builder import reduce_matrix_svd  # Réduction dimensionnelle via SVD
+from rdf_builder import extract_rdf_triples  # Extraction des triplets RDF
+from rdflib import Graph
+import matplotlib.pyplot as plt
+import networkx as nx
+from sklearn.cluster import KMeans
+from sklearn.metrics.pairwise import cosine_similarity
+import community as community_louvain  # Pour le clustering Louvain (RDF)
 
-def run_pipeline(input_file, output_image, similarity_threshold=0.5):
-    # 1. Chargement du texte
+# ------------------ RDF : Visualisation ------------------
+
+def visualize_rdf_graph(rdf_graph: Graph, output_image: str):
+    """
+    Transforme un graphe RDF en visualisation PNG avec NetworkX.
+    """
+    G = nx.DiGraph()
+
+    # Création du graphe orienté depuis les triplets RDF
+    for s, p, o in rdf_graph:
+        G.add_edge(s.split('/')[-1], o.split('/')[-1], label=p.split('/')[-1])
+
+    # Clustering Louvain pour des couleurs de groupes
+    partition = community_louvain.best_partition(G.to_undirected())
+    node_colors = [partition[n] for n in G.nodes()]
+
+    pos = nx.spring_layout(G, seed=42)
+    edge_labels = nx.get_edge_attributes(G, 'label')
+
+    plt.figure(figsize=(14, 10))
+    nx.draw(G, pos, with_labels=True, font_size=6, node_size=1000, arrows=True, node_color=node_colors, cmap=plt.cm.Set3)
+    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=6)
+    plt.title("Graphe RDF (cooccurrences)")
+    plt.tight_layout()
+    plt.savefig(output_image)
+    print(f"[✔] Graphe RDF enregistré : {output_image}")
+
+
+# ------------------ RDF : Pipeline ------------------
+
+def run_rdf_pipeline(input_file, output_image, window_size=2):
+    """
+    Extrait un graphe RDF à partir d’un texte, le convertit en PNG et sauvegarde aussi le fichier .ttl.
+    """
     raw_text = load_corpus(input_file)
-
-    # 2. Prétraitement : nettoyage, tokenisation, etc.
     tokens = preprocess_text(raw_text)
-    joined_text = [" ".join(tokens)]  # On prépare un seul document pour TF-IDF
 
-    # 3. Calcul du TF-IDF et filtrage
+    # Extraction des triplets RDF à partir d'une fenêtre glissante
+    rdf_graph = extract_rdf_triples(tokens, window_size=window_size)
+
+    # Sauvegarde graphique
+    visualize_rdf_graph(rdf_graph, output_image)
+
+    # Sauvegarde du fichier RDF au format Turtle
+    ttl_file = output_image.replace(".png", ".ttl")
+    rdf_graph.serialize(destination=ttl_file, format="turtle")
+    print(f"[✔] RDF exporté au format Turtle : {ttl_file}")
+
+
+# ------------------ SIMILARITÉ : Pipeline ------------------
+
+def run_similarity_pipeline(input_files, output_image, similarity_threshold=0.5, top_k=5):
+    """
+    Génère un graphe de similarité sémantique à partir de plusieurs fichiers texte.
+    """
+    corpus = []
+    for file in input_files:
+        raw_text = load_corpus(file)
+        tokens = preprocess_text(raw_text)
+        corpus.append(" ".join(tokens))
+
+    # TF-IDF avec filtrage (min_threshold)
     tfidf_proc = TFIDFProcessor(min_threshold=0.1)
-    filtered_docs, tfidf_matrix, feature_names = tfidf_proc.compute_tfidf(joined_text)
+    filtered_docs, _, _ = tfidf_proc.compute_tfidf(corpus)
 
-    # 4. Création d’une liste unique des termes filtrés
+    # Vocabulaire unique filtré
     all_terms = list({term for doc in filtered_docs for term in doc})
 
-    # 5. Construction des vecteurs document x termes (ici un seul document)
-    doc_vectors = build_document_vectors(dict(enumerate(filtered_docs)), all_terms, joined_text)
+    # Création de la matrice vecteurs
+    doc_vectors = build_document_vectors(dict(enumerate(filtered_docs)), all_terms, corpus)
 
+    # Sécurité si pas assez de termes
     if doc_vectors.shape[1] == 0:
         print("Aucun terme pertinent après TF-IDF. Essayez un autre texte.")
         return
 
-    # 6. Réduction de dimension avec SVD (au max 10 ou nb de colonnes)
+    # Réduction dimensionnelle
     n_components = min(10, doc_vectors.shape[1])
-    print(f"Réduction SVD à {n_components} composantes (sur {doc_vectors.shape[1]} dimensions)")
+    print(f"[INFO] Réduction SVD à {n_components} composantes (sur {doc_vectors.shape[1]} dimensions)")
     reduced_matrix = reduce_matrix_svd(doc_vectors, n_components=n_components)
 
-    # 7. Transposition pour appliquer le clustering sur les termes (colonnes)
+    # Transposition : clustering sur les mots (termes)
     term_matrix = doc_vectors.T
+
+    # Clustering KMeans
     if term_matrix.shape[0] > 1:
         kmeans = KMeans(n_clusters=min(3, term_matrix.shape[0]), random_state=42)
         labels = kmeans.fit_predict(term_matrix)
     else:
         labels = [0] * term_matrix.shape[0]
 
-    # 8. Calcul des similarités cosinus entre les termes
+    # Calcul des similarités entre mots
     term_similarity = cosine_similarity(term_matrix)
 
-    # 9. Construction du graphe dirigé
+    # Construction du graphe
     G = nx.DiGraph()
     for idx, term in enumerate(all_terms):
-        G.add_node(term, group=labels[idx])  # chaque mot est un noeud avec une couleur (groupe)
+        G.add_node(term, group=labels[idx])
 
     for i in range(len(all_terms)):
-        for j in range(len(all_terms)):
-            if i != j and term_similarity[i][j] >= similarity_threshold:
-                G.add_edge(all_terms[i], all_terms[j], weight=round(term_similarity[i][j], 2))
+        similarities = list(enumerate(term_similarity[i]))
+        similarities = sorted(
+            [(j, score) for j, score in similarities if i != j and score >= similarity_threshold],
+            key=lambda x: x[1],
+            reverse=True
+        )[:top_k]
 
-    # 10. Affichage et sauvegarde du graphe
+        for j, score in similarities:
+            G.add_edge(all_terms[i], all_terms[j], weight=round(score, 2))
+
+    # Affichage
     pos = nx.spring_layout(G, seed=42)
     edge_labels = nx.get_edge_attributes(G, 'weight')
     node_colors = [G.nodes[n]['group'] for n in G.nodes]
+    edge_widths = [d['weight'] * 3 for _, _, d in G.edges(data=True)]
 
-    plt.figure(figsize=(12, 9))
+    plt.figure(figsize=(14, 10))
     nx.draw(G, pos, with_labels=True, node_color=node_colors, cmap=plt.cm.Set3,
-            node_size=1500, font_weight='bold', arrows=True)
-    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels)
-    plt.title("Graphe de similarité entre mots avec clustering")
+            node_size=1500, font_weight='bold', arrows=True, width=edge_widths)
+    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_size=6)
+
+    plt.title("Graphe de similarité entre mots (top-k connexions + pondération)")
     plt.tight_layout()
     plt.savefig(output_image)
-    print(f"Graphe enregistré : {output_image}")
+    print(f"[✔] Graphe de similarité enregistré : {output_image}")
 
-# Partie CLI : pour exécuter depuis le terminal
+
+# ------------------ Interface CLI ------------------
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Pipeline de génération de graphe à partir d’un texte.")
-    parser.add_argument("input_file", help="Chemin vers le fichier texte")
+    parser = argparse.ArgumentParser(description="Génère un graphe RDF (1 texte) ou un graphe de similarité (2+ textes).")
+    parser.add_argument("input_files", nargs='+', help="Un ou plusieurs fichiers texte")
     parser.add_argument("-o", "--output", default="output_graph.png", help="Nom de l’image en sortie")
-    parser.add_argument("-t", "--threshold", type=float, default=0.5, help="Seuil de similarité cosinus pour créer les arêtes")
+    parser.add_argument("-w", "--window", type=int, default=2, help="Fenêtre de cooccurrence pour RDF")
+    parser.add_argument("-t", "--threshold", type=float, default=0.5, help="Seuil de similarité pour le graphe")
+    parser.add_argument("-k", "--top_k", type=int, default=5, help="Top connexions par mot")
     args = parser.parse_args()
-    run_pipeline(args.input_file, args.output, args.threshold)
+
+    if len(args.input_files) == 1:
+        run_rdf_pipeline(args.input_files[0], args.output, args.window)
+    else:
+        run_similarity_pipeline(args.input_files, args.output, args.threshold, args.top_k)
