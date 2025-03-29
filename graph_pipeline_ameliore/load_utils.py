@@ -8,20 +8,30 @@ def load_corpus(filepath: str) -> str:
     Returns:
         str: contenu du fichier sous forme de chaîne de caractères.
     """
-    # Ouverture du fichier en mode lecture avec encodage UTF-8
     with open(filepath, 'r', encoding='utf-8') as file:
         return file.read()
 
 
-# Cette partie permet de tester le fichier en ligne de commande directement
+def load_multiple_corpus(filepaths: list) -> list:
+    """
+    Charge plusieurs fichiers texte et retourne une liste de leurs contenus.
+
+    Args:
+        filepaths (list): liste de chemins vers des fichiers texte.
+
+    Returns:
+        list: liste de chaînes de caractères, une par fichier.
+    """
+    return [load_corpus(path) for path in filepaths]
+
+
 if __name__ == "__main__":
     import sys
 
-    # Vérifie si un chemin de fichier a été fourni en argument
     if len(sys.argv) < 2:
-        print("Usage: python load_utils.py <chemin_vers_fichier.txt>")
+        print("Usage: python load_utils.py <chemin1.txt> <chemin2.txt> ...")
     else:
-        # Charge et affiche un extrait du texte (les 500 premiers caractères)
-        text = load_corpus(sys.argv[1])
-        print("Extrait du fichier chargé :")
-        print(text[:500])
+        for path in sys.argv[1:]:
+            text = load_corpus(path)
+            print(f"\n--- Contenu de {path} (extrait 300 caractères) ---")
+            print(text[:300])
